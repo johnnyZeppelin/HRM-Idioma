@@ -1,7 +1,8 @@
 import numpy as np
 import os
 
-folder_path = './data/sudoku-extreme-1k-aug-1000/train/'
+folder_path = './data/my-nlp-dataset/train/'
+# folder_path = './data/sudoku-extreme-1k-aug-1000/train/'
 # folder_path = './data/sudoku-extreme-full/train/'
 # folder_path = './data/sudoku-extreme-full/test/'
 

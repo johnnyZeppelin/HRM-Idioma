@@ -1,0 +1,96 @@
+import os
+import json
+import numpy as np
+from datasets import load_dataset
+from transformers import AutoTokenizer
+
+def prepare_nlp_dataset(
+    dataset_name: str,
+    text_field: str = "text",
+    model_name: str = "gpt2",
+    output_dir: str = "../data/my-nlp-dataset",
+    seq_len: int = 128,
+    test_size: float = 0.1,
+):
+    # 1. Load dataset from HuggingFace
+    dataset = load_dataset(dataset_name)
+    if "train" not in dataset:
+        dataset = dataset["train"].train_test_split(test_size=test_size)
+    else:
+        dataset = {
+            "train": dataset["train"],
+            "test": dataset["test"] if "test" in dataset else dataset["train"].train_test_split(test_size=test_size)["test"]
+        }
+
+    # 2. Load tokenizer
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+
+    pad_id = tokenizer.pad_token_id
+
+    # 3. Process each split
+    for split in ["train", "test"]:
+        split_dir = os.path.join(output_dir, split)
+        os.makedirs(split_dir, exist_ok=True)
+
+        all_inputs = []
+        all_labels = []
+        puzzle_indices = [0]
+        puzzle_identifiers = []
+        group_indices = [0]
+
+        # Iterate over all texts
+        for i, example in enumerate(dataset[split]):
+            text = example[text_field]
+            enc = tokenizer.encode(text, truncation=True, max_length=seq_len)
+            if not enc:
+                continue
+
+            # For LM: labels = inputs
+            all_inputs.append(enc)
+            all_labels.append(enc)
+            puzzle_identifiers.append(0)  # Single identifier for now
+            puzzle_indices.append(len(all_inputs))  # each example is its own puzzle
+
+            # Group: here 1 puzzle per group
+            if (i + 1) % 1000 == 0:
+                group_indices.append(len(all_inputs))
+
+        # Final group index
+        if group_indices[-1] != len(all_inputs):
+            group_indices.append(len(all_inputs))
+
+        # Pad to fixed length
+        all_inputs = np.array([seq + [pad_id] * (seq_len - len(seq)) for seq in all_inputs], dtype=np.int32)
+        all_labels = np.array([seq + [pad_id] * (seq_len - len(seq)) for seq in all_labels], dtype=np.int32)
+        puzzle_indices = np.array(puzzle_indices, dtype=np.int64)
+        puzzle_identifiers = np.array(puzzle_identifiers, dtype=np.int32)
+        group_indices = np.array(group_indices, dtype=np.int64)
+
+        # dataset.json
+        dataset_json = {
+            "sets": ["all"],
+            "pad_id": pad_id,
+            "blank_identifier_id": 0,
+            "ignore_label_id": None
+        }
+
+        # Save files
+        with open(os.path.join(split_dir, "dataset.json"), "w") as f:
+            json.dump(dataset_json, f)
+        np.save(os.path.join(split_dir, "all__inputs.npy"), all_inputs)
+        np.save(os.path.join(split_dir, "all__labels.npy"), all_labels)
+        np.save(os.path.join(split_dir, "all__puzzle_indices.npy"), puzzle_indices)
+        np.save(os.path.join(split_dir, "all__puzzle_identifiers.npy"), puzzle_identifiers)
+        np.save(os.path.join(split_dir, "all__group_indices.npy"), group_indices)
+
+    # identifiers.json
+    with open(os.path.join(output_dir, "identifiers.json"), "w") as f:
+        json.dump(["<blank>"], f)
+
+    print(f"✅ Dataset saved to {output_dir}")
+
+
+# Example usage:
+prepare_nlp_dataset("wikitext", text_field="text", model_name="gpt2", seq_len=128)
